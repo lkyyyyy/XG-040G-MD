@@ -3,6 +3,9 @@ name: XG-040G-MD
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
   REPO_BRANCH: v25.12.1
@@ -205,7 +208,7 @@ jobs:
         echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
 
     - name: Upload Firmware To Artifact(将固件上传到Artifact)
-      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
+      if: steps.compile.outputs.status == 'success'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
