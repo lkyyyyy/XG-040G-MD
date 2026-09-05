@@ -110,6 +110,9 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         ./scripts/feeds install -d y -p istore luci-app-store luci-lib-taskd luci-lib-xterm taskd
+        # BusyBox already supplies tar on this target; avoid iStore requiring
+        # a separate tar package which is not emitted by the APK build.
+        sed -i 's/+tar //' feeds/istore/luci/luci-app-store/Makefile
 
     - name: Load Custom Configuration(加载自定义配置)
       run: |
@@ -140,7 +143,6 @@ jobs:
           CONFIG_PACKAGE_taskd=y \
           CONFIG_PACKAGE_libuci-lua=y \
           CONFIG_PACKAGE_mount-utils=y \
-          CONFIG_PACKAGE_tar=y \
           CONFIG_PACKAGE_luci-app-samba4=y \
           CONFIG_PACKAGE_luci-app-filebrowser=y \
           CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y; do
