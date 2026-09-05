@@ -1,0 +1,224 @@
+name: XG-040G-MD
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  REPO_BRANCH: v25.12.1
+  REPO_COMMIT: a3378d1a2c15beb2faf4b0bce9c00f07143efa29
+  QMODEM_COMMIT: dbe77b3cf262c2cb83916cf5c65bc18c98aa9b91
+  ISTORE_COMMIT: 3fca15b30aeed9ecacb3efc8b4a8b9c2584ad5c7
+  DEVICE_TARGET: airoha
+  DEVICE_SUBTARGET: an7581
+  CONFIG_FILE: config/xg-040g-md.config
+  CACHE_TOOLCHAIN: true
+  UPLOAD_BIN_DIR: false
+  FIRMWARE_RELEASE: true
+  TZ: Asia/Shanghai
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check Server Performance(检查服务器性能)
+      run: |
+        echo "警告⚠"
+        echo "分配的服务器性能有限，若选择的插件过多，务必注意CPU性能！"
+        echo -e "已知CPU型号（降序）：7763，8370C，8272CL，8171M，E5-2673 \n"
+        echo "--------------------------CPU信息--------------------------"
+        echo "CPU物理数量：$(cat /proc/cpuinfo | grep "physical id" | sort | uniq | wc -l)"
+        echo -e "CPU核心信息：$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo "--------------------------内存信息--------------------------"
+        echo "已安装内存详细信息："
+        echo -e "$(sudo lshw -short -C memory | grep GiB) \n"
+        echo "--------------------------硬盘信息--------------------------"
+        echo "硬盘数量：$(ls /dev/sd* | grep -v [1-9] | wc -l)" && df -hT
+
+    - name: Initialization Environment(初始化环境)
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E apt -yqq install dos2unix
+        sudo -E apt -yqq install libfuse-dev
+        sudo -E apt -yqq autoremove --purge
+        sudo -E apt -yqq autoclean
+        sudo -E apt -yqq clean
+        sudo -E systemctl daemon-reload
+        sudo timedatectl set-timezone "$TZ"
+
+    - name: Combine Disks(合并磁盘)
+      uses: easimon/maximize-build-space@c28619d8999a147d5e09c1199f84ff6af6ad5794
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 100
+        root-reserve-mb: 1024
+
+    - name: Checkout
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+    - name: Clone Source Code(克隆源代码)
+      run: |
+        df -hT $GITHUB_WORKSPACE
+        mkdir openwrt
+        cd openwrt
+        git init
+        git remote add origin "$REPO_URL"
+        git fetch --depth 1 origin "$REPO_COMMIT"
+        git checkout --detach FETCH_HEAD
+        test "$(git rev-parse HEAD)" = "$REPO_COMMIT"
+        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        VERSION_INFO=$(git show -s --date=short --format="作者: %an<br/>时间: %cd<br/>内容: %s<br/>hash: %H")
+        echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        echo "REPO_BRANCH=$REPO_BRANCH" >> $GITHUB_ENV
+
+    - name: Add XG-040G-MD Support(添加 XG-040G-MD 支持)
+      run: |
+        cp -a patch-25.12 "$OPENWRT_PATH/patch-25.12"
+        chmod 0755 "$OPENWRT_PATH/patch-25.12/patch.sh"
+        cd "$OPENWRT_PATH"
+        ./patch-25.12/patch.sh
+        test -e target/linux/airoha/dts/an7581-bell_xg-040g-md.dts
+        grep -q '^TARGET_DEVICES += bell_xg-040g-md$' target/linux/airoha/image/an7581.mk
+
+    - name: Generate Variables(生成变量)
+      run: |
+        SOURCE_REPO="$(echo $REPO_URL | awk -F '/' '{print $(NF)}')"
+        echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+        echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+        echo "RELEASE_TAG=XG-040G-MD-$(date +"%Y%m%d")-${{ github.run_number }}" >> $GITHUB_ENV
+
+    - name: Cache Toolchain(缓存工具链)
+      if: env.CACHE_TOOLCHAIN == 'true'
+      uses: HiGarfield/cachewrtbuild@3c396d6d42253c392a1c7c2ca996869c3d5b5853
+      with:
+        ccache: false
+        mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
+        prefix: ${{ env.OPENWRT_PATH }}
+    
+    - name: Install Feeds(安装feeds)
+      run: |
+        cd $OPENWRT_PATH
+        cat >> feeds.conf.default <<EOF
+        src-git qmodem https://github.com/FUjr/QModem.git^${QMODEM_COMMIT}
+        src-git istore https://github.com/linkease/istore.git^${ISTORE_COMMIT}
+        EOF
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        ./scripts/feeds install -d y -p istore luci-app-store luci-lib-taskd luci-lib-xterm taskd
+
+    - name: Load Custom Configuration(加载自定义配置)
+      run: |
+        test -e "$CONFIG_FILE"
+        mv "$CONFIG_FILE" "$OPENWRT_PATH/.config"
+        mkdir -p "$OPENWRT_PATH/files"
+        cp -a files/. "$OPENWRT_PATH/files/"
+        chmod 0755 "$OPENWRT_PATH/files/etc/uci-defaults/99-xg-official-apk-feeds"
+        cd $OPENWRT_PATH
+        make defconfig
+        # ImmortalWrt 25.12 may drop iStore during defconfig because its
+        # feed-local extra dependencies are not represented in the base
+        # Kconfig pass. Restore the feed packages after dependency resolution.
+        for option in \
+          CONFIG_PACKAGE_luci-app-store=y \
+          CONFIG_PACKAGE_luci-lib-taskd=y \
+          CONFIG_PACKAGE_luci-lib-xterm=y \
+          CONFIG_PACKAGE_taskd=y; do
+          grep -qx "$option" .config || echo "$option" >> .config
+        done
+        grep -E '^CONFIG_PACKAGE_(luci-app-store|luci-lib-taskd|luci-lib-xterm|taskd)=' .config
+        for option in \
+          CONFIG_PACKAGE_luci-app-airoha-npu=y \
+          CONFIG_PACKAGE_luci-app-qmodem-next=y \
+          CONFIG_PACKAGE_luci-app-store=y \
+          CONFIG_PACKAGE_luci-app-samba4=y \
+          CONFIG_PACKAGE_luci-app-filebrowser=y \
+          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y; do
+          grep -qx "$option" .config || { echo "Missing required option: $option"; exit 1; }
+        done
+
+    - name: Download DL Package(下载DL软件包)
+      run: |
+        cd $OPENWRT_PATH
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile Firmware(开始编译固件)
+      id: compile
+      run: |
+        cd $OPENWRT_PATH
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
+        echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+
+    - name: Check Space Usage(检查空间使用情况)
+      if: (!cancelled())
+      run: df -hT
+
+    - name: Upload Bin Directory(上传固件)
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: ${{ env.SOURCE_REPO }}-bin-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.OPENWRT_PATH }}/bin
+
+    - name: Organize Files(整理文件)
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd $OPENWRT_PATH/bin/targets/*/*
+        MANIFEST="$(find . -maxdepth 1 -type f -name '*.manifest' | head -n 1)"
+        test -n "$MANIFEST"
+        for package in \
+          kmod-airoha-npu \
+          qmodem \
+          luci-app-qmodem-next \
+          luci-app-store \
+          luci-app-samba4 \
+          luci-app-filebrowser \
+          kmod-usb-net-qmi-wwan \
+          kmod-usb-net-cdc-mbim \
+          kmod-usb-net-rndis \
+          kmod-usb-serial-option; do
+          grep -q "^${package} - " "$MANIFEST" || { echo "Firmware manifest is missing: $package"; exit 1; }
+        done
+        cat sha256sums
+        echo "VERSION_KERNEL=$(find -type f -name "*.manifest" -exec grep -oP '^kernel - \K.*?(?=~|-\d+-)' {} \;)" >> $GITHUB_ENV
+        cp $OPENWRT_PATH/.config build.config
+        mv -f $OPENWRT_PATH/bin/packages/*/*/*.apk packages
+        tar -zcf Packages.tar.gz packages
+        rm -rf packages feeds.buildinfo version.buildinfo
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+
+    - name: Upload Firmware To Artifact(将固件上传到Artifact)
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE != 'true'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: ${{ env.SOURCE_REPO }}-firmware-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}-${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE_PATH }}
+
+    - name: Upload Firmware To Release(发布固件)
+      if: steps.compile.outputs.status == 'success' && env.FIRMWARE_RELEASE == 'true'
+      uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
+      with:
+        name: ${{ env.RELEASE_TAG }}
+        tag: ${{ env.RELEASE_TAG }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+        artifacts: ${{ env.FIRMWARE_PATH }}/*
+        body: |
+          **This is OpenWrt Firmware for XG-040G-MD**
+          ### 📒 固件信息(XG-040G-MD)
+          - 这是 XG-040G-MD 的专属构建
+          - 💻 目标分支：${{ env.REPO_BRANCH }}
+          - ⚽ 固件源码: ${{ env.REPO_URL }}
+          - 🌐 默认地址: 192.168.1.1
+          - 🔑 默认密码: 无
+          ### 🧊 固件版本
+          - 固件内核版本：${{ env.VERSION_KERNEL }}
+          - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
+          - ${{ env.VERSION_INFO }}

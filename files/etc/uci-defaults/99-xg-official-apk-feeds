@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# This board uses a custom kernel build, so only publish the official
+# architecture-independent/user-space feeds here. Kernel modules required by
+# the board and cellular modems are built into the firmware image.
+cat > /etc/apk/repositories.d/distfeeds.list <<'EOF'
+https://downloads.immortalwrt.org/releases/25.12.1/packages/aarch64_cortex-a53/base/packages.adb
+https://downloads.immortalwrt.org/releases/25.12.1/packages/aarch64_cortex-a53/packages/packages.adb
+https://downloads.immortalwrt.org/releases/25.12.1/packages/aarch64_cortex-a53/luci/packages.adb
+https://downloads.immortalwrt.org/releases/25.12.1/packages/aarch64_cortex-a53/routing/packages.adb
+https://downloads.immortalwrt.org/releases/25.12.1/packages/aarch64_cortex-a53/telephony/packages.adb
+EOF
+
+exit 0
