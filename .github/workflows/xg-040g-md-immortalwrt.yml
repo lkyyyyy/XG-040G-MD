@@ -10,8 +10,10 @@ env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
   REPO_BRANCH: v25.12.1
   REPO_COMMIT: a3378d1a2c15beb2faf4b0bce9c00f07143efa29
-  QMODEM_COMMIT: dbe77b3cf262c2cb83916cf5c65bc18c98aa9b91
   ISTORE_COMMIT: 3fca15b30aeed9ecacb3efc8b4a8b9c2584ad5c7
+  SMALL_COMMIT: eeb4ae6a301901336f8ea78628d8059337c52aee
+  ARGON_THEME_COMMIT: 815f0b27275f3c9555a8cc7c5bb2332b5a798533
+  ARGON_CONFIG_COMMIT: 9f096c916c16be8075610dd137d3b18982f81f1e
   DEVICE_TARGET: airoha
   DEVICE_SUBTARGET: an7581
   CONFIG_FILE: config/xg-040g-md.config
@@ -107,9 +109,18 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         cat >> feeds.conf.default <<EOF
-        src-git qmodem https://github.com/FUjr/QModem.git^${QMODEM_COMMIT}
         src-git istore https://github.com/linkease/istore.git^${ISTORE_COMMIT}
+        src-git small https://github.com/kenzok8/small.git^${SMALL_COMMIT}
         EOF
+        # Argon 主题（第三方仓库，clone 到 package/ 目录更稳，避免 feeds 解析报错）
+        git init package/luci-theme-argon
+        git -C package/luci-theme-argon remote add origin https://github.com/jerrykuku/luci-theme-argon.git
+        git -C package/luci-theme-argon fetch --depth 1 origin "$ARGON_THEME_COMMIT"
+        git -C package/luci-theme-argon checkout --detach FETCH_HEAD
+        git init package/luci-app-argon-config
+        git -C package/luci-app-argon-config remote add origin https://github.com/jerrykuku/luci-app-argon-config.git
+        git -C package/luci-app-argon-config fetch --depth 1 origin "$ARGON_CONFIG_COMMIT"
+        git -C package/luci-app-argon-config checkout --detach FETCH_HEAD
         ./scripts/feeds update -a
         ./scripts/feeds install -a
         ./scripts/feeds install -d y -p istore luci-app-store luci-lib-taskd luci-lib-xterm taskd
@@ -133,13 +144,31 @@ jobs:
           CONFIG_PACKAGE_luci-app-store=y \
           CONFIG_PACKAGE_luci-lib-taskd=y \
           CONFIG_PACKAGE_luci-lib-xterm=y \
-          CONFIG_PACKAGE_taskd=y; do
+          CONFIG_PACKAGE_taskd=y \
+          CONFIG_PACKAGE_luci-theme-argon=y \
+          CONFIG_PACKAGE_luci-app-argon-config=y \
+          CONFIG_PACKAGE_luci-compat=y \
+          CONFIG_PACKAGE_mwan3=y \
+          CONFIG_PACKAGE_luci-app-mwan3=y \
+          CONFIG_PACKAGE_iptables=y \
+          CONFIG_PACKAGE_tcpdump=y \
+          CONFIG_PACKAGE_ip-bridge=y \
+          CONFIG_PACKAGE_iperf3=y \
+          CONFIG_PACKAGE_openssh-sftp-server=y \
+          CONFIG_PACKAGE_xray-core=y \
+          CONFIG_PACKAGE_sing-box=y \
+          CONFIG_PACKAGE_hysteria=y \
+          CONFIG_PACKAGE_trojan-go=y \
+          CONFIG_PACKAGE_naiveproxy=y \
+          CONFIG_PACKAGE_tuic-client=y \
+          CONFIG_PACKAGE_shadowsocksr-libev-ssr-local=y; do
           grep -qx "$option" .config || echo "$option" >> .config
         done
-        grep -E '^CONFIG_PACKAGE_(luci-app-store|luci-lib-taskd|luci-lib-xterm|taskd)=' .config
+        grep -E '^CONFIG_PACKAGE_(luci-app-store|luci-lib-taskd|luci-lib-xterm|taskd|luci-theme-argon|luci-app-argon-config)=' .config
         for option in \
           CONFIG_PACKAGE_luci-app-airoha-npu=y \
-          CONFIG_PACKAGE_luci-app-qmodem-next=y \
+          CONFIG_PACKAGE_luci-theme-argon=y \
+          CONFIG_PACKAGE_luci-app-argon-config=y \
           CONFIG_PACKAGE_luci-app-store=y \
           CONFIG_PACKAGE_luci-lib-taskd=y \
           CONFIG_PACKAGE_luci-lib-xterm=y \
@@ -148,7 +177,7 @@ jobs:
           CONFIG_PACKAGE_mount-utils=y \
           CONFIG_PACKAGE_luci-app-samba4=y \
           CONFIG_PACKAGE_luci-app-filebrowser=y \
-          CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y; do
+          CONFIG_PACKAGE_luci-compat=y; do
           grep -qx "$option" .config || { echo "Missing required option: $option"; exit 1; }
         done
 
@@ -188,11 +217,13 @@ jobs:
         test -n "$MANIFEST"
         for package in \
           kmod-airoha-npu \
-          qmodem \
-          luci-app-qmodem-next \
+          luci-theme-argon \
+          luci-app-argon-config \
           luci-app-store \
           luci-app-samba4 \
           luci-app-filebrowser \
+          mwan3 \
+          luci-app-mwan3 \
           kmod-usb-net-qmi-wwan \
           kmod-usb-net-cdc-mbim \
           kmod-usb-net-rndis \
@@ -234,3 +265,4 @@ jobs:
           - 固件内核版本：${{ env.VERSION_KERNEL }}
           - 固件编译前最后一次➦[主源码](${{ env.REPO_URL }})更新记录
           - ${{ env.VERSION_INFO }}
+
