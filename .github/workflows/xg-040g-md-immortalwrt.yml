@@ -18,6 +18,8 @@ env:
   DEVICE_SUBTARGET: an7581
   CONFIG_FILE: config/xg-040g-md.config
   CACHE_TOOLCHAIN: true
+  # Cap the persistent compiler cache so the combined Actions cache remains practical.
+  CCACHE_MAXSIZE: 3G
   UPLOAD_BIN_DIR: false
   FIRMWARE_RELEASE: true
   TZ: Asia/Shanghai
@@ -101,9 +103,14 @@ jobs:
       if: env.CACHE_TOOLCHAIN == 'true'
       uses: HiGarfield/cachewrtbuild@3c396d6d42253c392a1c7c2ca996869c3d5b5853
       with:
-        ccache: false
-        mixkey: ${{ env.SOURCE_REPO }}-${{ env.REPO_BRANCH }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
+        # .config already enables CONFIG_CCACHE; persist its cache between runs.
+        ccache: true
+        # The source and third-party feeds are pinned, so this is both reusable
+        # and invalidated when a compiler or package source changes.
+        mixkey: ${{ env.REPO_COMMIT }}-${{ env.ISTORE_COMMIT }}-${{ env.SMALL_COMMIT }}-${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
         prefix: ${{ env.OPENWRT_PATH }}
+        extra_paths: |
+          dl
     
     - name: Install Feeds(安装feeds)
       run: |
@@ -197,7 +204,9 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         echo -e "$(nproc) thread compile"
+        ccache -s || true
         make -j$(nproc)
+        ccache -s || true
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
         echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
