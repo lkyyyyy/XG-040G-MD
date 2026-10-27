@@ -127,10 +127,6 @@ jobs:
         # BusyBox already supplies tar on this target; avoid iStore requiring
         # a separate tar package which is not emitted by the APK build.
         sed -i 's/+tar //' feeds/istore/luci/luci-app-store/Makefile
-        # The pinned Rust 1.94 package feed references CI LLVM artifacts that have expired.
-        sed -i 's/--set=llvm\.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/' feeds/packages/lang/rust/Makefile
-        grep -q -- '--set=llvm.download-ci-llvm=false' feeds/packages/lang/rust/Makefile || { echo 'Rust LLVM local-build setting was not applied'; exit 1; }
-        if grep -q -- '--set=llvm.download-ci-llvm=true' feeds/packages/lang/rust/Makefile; then echo 'Rust CI LLVM download remains enabled'; exit 1; fi
 
     - name: Load Custom Configuration(加载自定义配置)
       run: |
@@ -141,6 +137,11 @@ jobs:
         chmod 0755 "$OPENWRT_PATH/files/etc/uci-defaults/99-xg-official-apk-feeds"
         cd $OPENWRT_PATH
         make defconfig
+        # The packages-feed TUIC client pulls rust/host, whose pinned CI LLVM
+        # artifact expired. It is not required by this firmware's selected features.
+        if grep -q '^CONFIG_PACKAGE_tuic-client=' .config; then
+          echo 'Unexpected tuic-client selection would require Rust/LLVM'; exit 1
+        fi
         # ImmortalWrt 25.12 may drop iStore during defconfig because its
         # feed-local extra dependencies are not represented in the base
         # Kconfig pass. Restore the feed packages after dependency resolution.
@@ -164,7 +165,6 @@ jobs:
           CONFIG_PACKAGE_hysteria=y \
           CONFIG_PACKAGE_trojan-go=y \
           CONFIG_PACKAGE_naiveproxy=y \
-          CONFIG_PACKAGE_tuic-client=y \
           CONFIG_PACKAGE_shadowsocksr-libev-ssr-local=y; do
           grep -qx "$option" .config || echo "$option" >> .config
         done
@@ -226,6 +226,7 @@ jobs:
           luci-app-store \
           luci-app-samba4 \
           luci-app-filebrowser \
+          luci-app-aria2 \
           mwan3 \
           luci-app-mwan3 \
           kmod-usb-net-qmi-wwan \
