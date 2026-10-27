@@ -214,14 +214,25 @@ jobs:
         echo -e "$(nproc) thread compile"
         ccache -s || true
         if ! make -j$(nproc); then
-          # Package/install failures are otherwise hidden by parallel make output.
-          # This reuses completed build stamps and exposes the actual failing command.
-          make -j1 V=sc
+          # Parallel make hides package/install errors. Keep the full serial retry
+          # in a file, then print its tail so the actionable error stays visible.
+          if ! make -j1 V=sc > "$OPENWRT_PATH/build-failure.log" 2>&1; then
+            tail -n 300 "$OPENWRT_PATH/build-failure.log"
+            exit 1
+          fi
         fi
         ccache -s || true
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
         echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+
+    - name: Upload Failed Build Log(上传失败日志)
+      if: failure()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: XG-040G-MD-build-failure-${{ github.run_number }}
+        path: ${{ env.OPENWRT_PATH }}/build-failure.log
+        if-no-files-found: ignore
 
     - name: Check Space Usage(检查空间使用情况)
       if: (!cancelled())
