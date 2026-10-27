@@ -129,7 +129,12 @@ jobs:
         git -C package/luci-app-argon-config fetch --depth 1 origin "$ARGON_CONFIG_COMMIT"
         git -C package/luci-app-argon-config checkout --detach FETCH_HEAD
         ./scripts/feeds update -a
-        ./scripts/feeds install -a
+        # Install all official feeds, but only the three selected small recipes.
+        # Installing all of small imports its known self-referential fchomo Kconfig.
+        for feed in packages luci routing telephony; do
+          ./scripts/feeds install -a -p "$feed"
+        done
+        ./scripts/feeds install -p small shadowsocks-libev shadowsocksr-libev trojan-go
         ./scripts/feeds install -d y -p istore luci-app-store luci-lib-taskd luci-lib-xterm taskd
         # BusyBox already supplies tar on this target; avoid iStore requiring
         # a separate tar package which is not emitted by the APK build.
@@ -148,6 +153,9 @@ jobs:
         # artifact expired. It is not required by this firmware's selected features.
         if grep -q '^CONFIG_PACKAGE_tuic-client=' .config; then
           echo 'Unexpected tuic-client selection would require Rust/LLVM'; exit 1
+        fi
+        if grep -Eq '^CONFIG_PACKAGE_luci-app-(fchomo|clashoo)=' .config; then
+          echo 'Unexpected small-feed application selected'; exit 1
         fi
         # ImmortalWrt 25.12 may drop iStore during defconfig because its
         # feed-local extra dependencies are not represented in the base
@@ -205,7 +213,11 @@ jobs:
         cd $OPENWRT_PATH
         echo -e "$(nproc) thread compile"
         ccache -s || true
-        make -j$(nproc)
+        if ! make -j$(nproc); then
+          # Package/install failures are otherwise hidden by parallel make output.
+          # This reuses completed build stamps and exposes the actual failing command.
+          make -j1 V=sc
+        fi
         ccache -s || true
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
